@@ -23,7 +23,8 @@ It then waits until the server is ready and prints the public IP and SSH command
 ## Requirements
 
 - An Oracle Cloud account (the Always Free tier is enough).
-- OCI Cloud Shell (the OCI CLI and `jq` are preinstalled and already authenticated).
+- Either OCI Cloud Shell (the OCI CLI and `jq` are preinstalled and already authenticated)
+  or the OCI CLI and `jq` on your own computer (see [Running on your computer](#running-on-your-computer)).
 - The [Amnezia VPN client](https://amnezia.org) on your computer.
 
 ## Quick start
@@ -39,6 +40,38 @@ EXTRA_PUBKEY='ssh-ed25519 AAAA... you@laptop' bash lethe.sh
 or simply `bash lethe.sh`.
 
 4. In the Amnezia client, add a server with the printed IP, user `ubuntu` and your SSH private key, then install the **Xray** protocol on port **443**.
+
+## Running on your computer
+
+Instead of Cloud Shell you can run the script on macOS or Linux (on Windows, use WSL). The SSH key then stays on your computer, ready for the Amnezia client.
+
+1. Install the OCI CLI and `jq`:
+
+```bash
+brew install oci-cli jq
+```
+
+On Linux use your package manager for `jq` and Oracle's [OCI CLI installer](https://docs.oracle.com/en-us/iaas/Content/API/SDKDocs/cliinstall.htm).
+
+2. Log in once. This opens the browser, creates an API key and writes `~/.oci/config`:
+
+```bash
+oci setup bootstrap
+```
+
+3. Check that it works:
+
+```bash
+oci iam region-subscription list --output table
+```
+
+4. Run the script. Outside Cloud Shell `COMPARTMENT_ID` must be set; the tenancy OCID from `~/.oci/config` works:
+
+```bash
+COMPARTMENT_ID=$(sed -n 's/^tenancy *= *//p' ~/.oci/config | head -n 1) bash lethe.sh
+```
+
+The SSH key is generated in `~/.ssh/oci_key` (change it with `SSH_KEY`); use that private key in the Amnezia client.
 
 ## Settings
 
