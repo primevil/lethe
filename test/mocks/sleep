@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Fake sleep for tests: records the delay and returns immediately.
+mkdir -p "$MOCK_DIR/calls"
+echo "$*" >> "$MOCK_DIR/calls/sleep"

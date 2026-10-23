@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Fake OCI CLI for tests.
+#
+# Every call is appended to $MOCK_DIR/calls/oci (one line per call). The
+# response is chosen by the first three arguments joined with "_", e.g.
+# "network_vcn_list":
+#   $MOCK_DIR/responses/<key>.sh    executed with the call's arguments
+#   $MOCK_DIR/responses/<key>.json  printed as is
+#   otherwise                       {"data":[]}
+# Files passed as "file://..." or after a "--*-file" flag are copied to
+# $MOCK_DIR/captured/<key>.<basename> so tests can inspect them.
+set -euo pipefail
+mkdir -p "$MOCK_DIR/calls" "$MOCK_DIR/captured"
+echo "$*" >> "$MOCK_DIR/calls/oci"
+
+key="${1:-}_${2:-}_${3:-}"
+
+prev=""
+for arg in "$@"; do
+  file=""
+  if [[ "$arg" == file://* ]]; then
+    file="${arg#file://}"
+  elif [[ "$prev" == --*-file ]]; then
+    file="$arg"
+  fi
+  if [[ -n "$file" && -f "$file" ]]; then
+    cp "$file" "$MOCK_DIR/captured/$key.$(basename "$file")"
+  fi
+  prev="$arg"
+done
+
+if [[ -f "$MOCK_DIR/responses/$key.sh" ]]; then
+  exec bash "$MOCK_DIR/responses/$key.sh" "$@"
+elif [[ -f "$MOCK_DIR/responses/$key.json" ]]; then
+  cat "$MOCK_DIR/responses/$key.json"
+else
+  echo '{"data":[]}'
+fi

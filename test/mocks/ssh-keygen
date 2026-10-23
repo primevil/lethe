@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Fake ssh-keygen for tests: "-f FILE" creates a dummy key pair, nothing else
+# is done.
+mkdir -p "$MOCK_DIR/calls"
+echo "$*" >> "$MOCK_DIR/calls/ssh-keygen"
+while (($#)); do
+  if [[ "$1" == -f ]]; then
+    echo "FAKE PRIVATE KEY" > "$2"
+    echo "ssh-rsa AAAAgenerated lethe@test" > "$2.pub"
+  fi
+  shift
+done
