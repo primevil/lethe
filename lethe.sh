@@ -84,6 +84,144 @@ pick_live_instance() {
          | .[0].id // empty'
 }
 
+usage() {
+  cat << 'EOF'
+Usage: bash lethe.sh [--help]
+
+Creates an Always Free Ubuntu VM on Oracle Cloud, ready for installing
+Amnezia VPN (Xray) from the Amnezia client. Runs in OCI Cloud Shell, or on
+macOS / Linux with the OCI CLI and jq installed and configured.
+
+Settings are environment variables, e.g.  SHAPE=VM.Standard.A1.Flex bash lethe.sh
+
+  COMPARTMENT_ID       $OCI_TENANCY in Cloud Shell, else the tenancy from ~/.oci/config
+  SHAPE                VM.Standard.E2.1.Micro (or VM.Standard.A1.Flex)
+  A1_OCPUS             2      A1_MEMORY_GB  12   (Flex shapes only)
+  UBUNTU_VERSION       24.04  UBUNTU_MINIMAL false
+  TCP_PORTS            443    (22 is always open)
+  UDP_PORTS            443
+  SWAP_GB              2      (0 disables swap)
+  SSH_KEY              ~/.ssh/oci_key (generated if missing)
+  EXTRA_PUBKEY         your own SSH public key line, added to the server
+  INSTANCE_NAME        ubuntu-free
+  LAUNCH_RETRIES       30     RETRY_DELAY      60  (on "Out of host capacity")
+  SSH_RETRIES          60     SSH_RETRY_DELAY  10
+  OCI_CLI_PROFILE      profile in ~/.oci/config (default DEFAULT)
+
+More: https://github.com/primevil/lethe
+EOF
+}
+
+# ------------------------------ ENVIRONMENT --------------------------------
+# macos, debian (also Ubuntu, Mint...), fedora, rhel (also Oracle Linux,
+# Rocky, Alma, CentOS), arch or unknown. LETHE_UNAME / LETHE_OS_RELEASE are for tests.
+detect_os() {
+  local kernel="${LETHE_UNAME:-}" os_release="${LETHE_OS_RELEASE:-/etc/os-release}" id="" like=""
+  [[ -n "$kernel" ]] || kernel=$(uname -s 2>/dev/null || echo unknown)
+  if [[ "$kernel" == Darwin ]]; then echo macos; return; fi
+  if [[ -r "$os_release" ]]; then
+    # shellcheck disable=SC1090
+    id=$(. "$os_release" && echo "${ID:-}")
+    # shellcheck disable=SC1090
+    like=$(. "$os_release" && echo "${ID_LIKE:-}")
+  fi
+  case "$id" in
+    debian|ubuntu)                       echo debian; return ;;
+    fedora)                              echo fedora; return ;;
+    rhel|ol|centos|rocky|almalinux)      echo rhel;   return ;;
+    arch|manjaro|endeavouros)            echo arch;   return ;;
+  esac
+  case " $like " in
+    *" debian "*|*" ubuntu "*) echo debian ;;
+    *" arch "*)                echo arch ;;
+    *" rhel "*|*" centos "*)   echo rhel ;;
+    *" fedora "*)              echo fedora ;;
+    *)                         echo unknown ;;
+  esac
+}
+
+# Commands that install the OCI CLI, jq and the OpenSSH client on an OS
+install_commands() {
+  case "$1" in
+    macos)
+      echo "brew install oci-cli jq" ;;
+    debian)
+      echo "sudo apt-get update"
+      echo "sudo apt-get install -y jq openssh-client pipx"
+      echo "pipx install oci-cli"
+      echo "pipx ensurepath" ;;
+    fedora)
+      echo "sudo dnf install -y jq openssh-clients pipx"
+      echo "pipx install oci-cli"
+      echo "pipx ensurepath" ;;
+    rhel)
+      echo "sudo dnf install -y jq openssh-clients python3-pip"
+      echo "python3 -m pip install --user oci-cli" ;;
+    arch)
+      echo "sudo pacman -S --needed --noconfirm jq openssh python-pipx"
+      echo "pipx install oci-cli"
+      echo "pipx ensurepath" ;;
+    *)
+      echo "# Install jq and the OpenSSH client with your package manager, then the OCI CLI:"
+      echo "# https://docs.oracle.com/en-us/iaas/Content/API/SDKDocs/cliinstall.htm" ;;
+  esac
+}
+
+# Exits with install instructions when a required command is missing
+check_deps() {
+  local missing=() cmd line
+  for cmd in oci jq ssh ssh-keygen; do
+    command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+  done
+  (( ${#missing[@]} == 0 )) && return 0
+  {
+    printf '\n\033[1;31mERROR:\033[0m Missing: %s\n' "${missing[*]}"
+    if [[ " ${missing[*]} " == *" oci "* && -x "$HOME/.local/bin/oci" ]]; then
+      printf '    oci is installed in ~/.local/bin, which is not in your PATH.\n'
+      printf '    Run "pipx ensurepath" (or add ~/.local/bin to PATH) and open a new terminal.\n'
+    fi
+    printf '    Install with:\n\n'
+    install_commands "$(detect_os)" | while IFS= read -r line; do printf '      %s\n' "$line"; done
+    printf '\n    Then log in once with "oci setup bootstrap".\n'
+    printf '    Or run lethe.sh in OCI Cloud Shell, where everything is preinstalled.\n'
+  } >&2
+  exit 1
+}
+
+# Tenancy OCID of $OCI_CLI_PROFILE (default DEFAULT) in the OCI CLI config;
+# like the CLI, falls back to the DEFAULT section
+config_tenancy() {
+  local cfg="${OCI_CLI_CONFIG_FILE:-$HOME/.oci/config}" profile="${OCI_CLI_PROFILE:-DEFAULT}" p t
+  [[ -r "$cfg" ]] || return 0
+  for p in "$profile" DEFAULT; do
+    t=$(awk -v want="[$p]" '
+          /^[[:space:]]*\[/ { s = $0; gsub(/[[:space:]]/, "", s); in_p = (s == want); next }
+          in_p && /^[[:space:]]*tenancy[[:space:]]*=/ {
+            sub(/^[^=]*=[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); print; exit }
+        ' "$cfg")
+    if [[ -n "$t" ]]; then echo "$t"; return 0; fi
+  done
+}
+
+# The OCI CLI has neither a config file nor another auth method (Cloud Shell)
+oci_unconfigured() {
+  [[ -z "${OCI_CLI_AUTH:-}" && ! -f "${OCI_CLI_CONFIG_FILE:-$HOME/.oci/config}" ]]
+}
+
+# Exits with a hint when the OCI CLI cannot authenticate or see the compartment
+check_auth() {
+  local err
+  if err=$(oci iam compartment get --compartment-id "$C" 2>&1 >/dev/null); then
+    return 0
+  fi
+  printf '%s\n' "$err" >> "$LOGF"
+  if oci_unconfigured; then
+    die "The OCI CLI is not configured. Run \"oci setup bootstrap\" once (it opens the browser), then re-run lethe.sh."
+  fi
+  printf '%s\n' "$err" | tail -n 5 >&2
+  die "The OCI CLI cannot access compartment $C (profile ${OCI_CLI_PROFILE:-DEFAULT}). Check ~/.oci/config or run \"oci setup bootstrap\" again."
+}
+
 # ------------------------------ VALIDATION ---------------------------------
 is_uint() { [[ "$1" =~ ^(0|[1-9][0-9]*)$ ]]; }
 
@@ -99,7 +237,8 @@ validate_ports() {
 
 validate_settings() {
   local v
-  [[ -n "$COMPARTMENT_ID" ]] || die "Set COMPARTMENT_ID (in Cloud Shell it defaults to \$OCI_TENANCY)."
+  [[ -n "$COMPARTMENT_ID" ]] \
+    || die "Set COMPARTMENT_ID (it defaults to \$OCI_TENANCY in Cloud Shell and to the tenancy in ~/.oci/config elsewhere)."
   [[ "$INSTANCE_NAME" =~ ^[A-Za-z0-9._-]+$ ]] \
     || die "INSTANCE_NAME may contain only letters, digits, '.', '_' and '-'."
   validate_ports TCP_PORTS "$TCP_PORTS"
@@ -230,16 +369,26 @@ launch_with_retry() {
 # ---------------------------------------------------------------------------
 main() {
   set -euo pipefail
+  case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+    "") ;;
+    *) die "Unknown option: $1 (see --help)" ;;
+  esac
   WORKDIR="$(mktemp -d)"
   trap 'rm -rf "$WORKDIR"' EXIT
   trap 'printf "\n\033[1;31mSomething went wrong (line %s). Details: %s\033[0m\n" "$LINENO" "$LOGF" >&2' ERR
   : > "$LOGF"
 
   log "Checking environment"
-  command -v oci >/dev/null || die "OCI CLI not found. Run this script in OCI Cloud Shell."
-  command -v jq  >/dev/null || die "jq not found."
+  check_deps
+  if [[ -z "$COMPARTMENT_ID" ]]; then
+    oci_unconfigured \
+      && die "The OCI CLI is not configured. Run \"oci setup bootstrap\" once (it opens the browser), then re-run lethe.sh."
+    COMPARTMENT_ID=$(config_tenancy)
+  fi
   validate_settings
   C="$COMPARTMENT_ID"
+  check_auth
   info "Compartment: $C"
   info "Shape:       $SHAPE"
   info "Log:         $LOGF"
@@ -360,7 +509,7 @@ main() {
   # -------------------------------------------------------------------------
   log "Waiting for SSH"
   ssh-keygen -R "$IP" >/dev/null 2>&1 || true
-  SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5
+  SSH_OPTS=(-n -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5
             -o BatchMode=yes -o ServerAliveInterval=30)
   SSH_UP=0
   for ((i = 1; i <= SSH_RETRIES; i++)); do
@@ -398,6 +547,9 @@ main() {
       - user:      ubuntu
       - key:       SSH private key (e.g. $SSH_KEY or your own)
     Then install the Xray protocol on port 443.
+
+    Check, with the VPN connected (should print ip=$IP):
+      curl -s --max-time 10 https://1.1.1.1/cdn-cgi/trace | grep ip=
 EOF
 }
 

@@ -40,18 +40,27 @@ EXTRA_PUBKEY='ssh-ed25519 AAAA... you@laptop' bash lethe.sh
 or simply `bash lethe.sh`.
 
 4. In the Amnezia client, add a server with the printed IP, user `ubuntu` and your SSH private key, then install the **Xray** protocol on port **443**.
+5. Connect and check that your traffic leaves through the server. This should print the server's IP:
+
+```bash
+curl -s --max-time 10 https://1.1.1.1/cdn-cgi/trace | grep ip=
+```
 
 ## Running on your computer
 
 Instead of Cloud Shell you can run the script on macOS or Linux (on Windows, use WSL). The SSH key then stays on your computer, ready for the Amnezia client.
 
-1. Install the OCI CLI and `jq`:
+1. Install the OCI CLI, `jq` and the OpenSSH client. If something is missing, `lethe.sh` stops and prints these commands for your system:
 
-```bash
-brew install oci-cli jq
-```
+| System | Commands |
+|---|---|
+| macOS | `brew install oci-cli jq` |
+| Debian, Ubuntu | `sudo apt-get update`<br>`sudo apt-get install -y jq openssh-client pipx`<br>`pipx install oci-cli`<br>`pipx ensurepath` |
+| Fedora | `sudo dnf install -y jq openssh-clients pipx`<br>`pipx install oci-cli`<br>`pipx ensurepath` |
+| Oracle Linux, RHEL, Rocky, Alma | `sudo dnf install -y jq openssh-clients python3-pip`<br>`python3 -m pip install --user oci-cli` |
+| Arch | `sudo pacman -S --needed --noconfirm jq openssh python-pipx`<br>`pipx install oci-cli`<br>`pipx ensurepath` |
 
-On Linux use your package manager for `jq` and Oracle's [OCI CLI installer](https://docs.oracle.com/en-us/iaas/Content/API/SDKDocs/cliinstall.htm).
+Other systems: see Oracle's [OCI CLI installation guide](https://docs.oracle.com/en-us/iaas/Content/API/SDKDocs/cliinstall.htm). After `pipx ensurepath` (or `pip install --user`) open a new terminal so `~/.local/bin` is in your `PATH`.
 
 2. Log in once. This opens the browser, creates an API key and writes `~/.oci/config`:
 
@@ -59,19 +68,13 @@ On Linux use your package manager for `jq` and Oracle's [OCI CLI installer](http
 oci setup bootstrap
 ```
 
-3. Check that it works:
+3. Run the script. It uses the tenancy from `~/.oci/config` (profile `DEFAULT`, or `OCI_CLI_PROFILE`) and checks that the OCI CLI can log in before creating anything:
 
 ```bash
-oci iam region-subscription list --output table
+bash lethe.sh
 ```
 
-4. Run the script. Outside Cloud Shell `COMPARTMENT_ID` must be set; the tenancy OCID from `~/.oci/config` works:
-
-```bash
-COMPARTMENT_ID=$(sed -n 's/^tenancy *= *//p' ~/.oci/config | head -n 1) bash lethe.sh
-```
-
-The SSH key is generated in `~/.ssh/oci_key` (change it with `SSH_KEY`); use that private key in the Amnezia client.
+The SSH key is generated in `~/.ssh/oci_key` (change it with `SSH_KEY`); use that private key in the Amnezia client. `bash lethe.sh --help` lists all settings.
 
 ## Settings
 
@@ -91,6 +94,8 @@ Every setting can be overridden with an environment variable, e.g. `SHAPE=VM.Sta
 | `INSTANCE_NAME` | `ubuntu-free` | Instance display name |
 | `LAUNCH_RETRIES` / `RETRY_DELAY` | `30` / `60` | Retries on *Out of host capacity* |
 | `SSH_RETRIES` / `SSH_RETRY_DELAY` | `60` / `10` | How long to wait for SSH after launch |
+| `COMPARTMENT_ID` | `$OCI_TENANCY` in Cloud Shell, else the tenancy from `~/.oci/config` | Compartment for all resources |
+| `OCI_CLI_PROFILE` | `DEFAULT` | Profile in `~/.oci/config` |
 
 Settings are validated before anything is created: ports must be numbers 1-65535, numeric settings non-negative integers and `EXTRA_PUBKEY` a single SSH public key line.
 
@@ -120,7 +125,7 @@ The script is safe to re-run. If the instance already exists, it only updates th
 
 ## Development
 
-The tests use [bats](https://github.com/bats-core/bats-core) with fake `oci`, `ssh` and `ssh-keygen` commands (`test/mocks`), so they need neither an Oracle Cloud account nor network access. CI runs them together with [ShellCheck](https://www.shellcheck.net) on every pull request and push to `main`.
+The tests use [bats](https://github.com/bats-core/bats-core) with fake `oci`, `ssh` and `ssh-keygen` commands (`test/mocks`), so they need neither an Oracle Cloud account nor network access. CI runs them together with [ShellCheck](https://www.shellcheck.net) on every pull request and push to `main`, and also in Debian, Ubuntu, Fedora, Oracle Linux, Rocky and Arch containers, where it runs the install commands from the table above and checks that `oci` works afterwards.
 
 ```bash
 bats test/

@@ -15,6 +15,7 @@ setup() {
   [[ "$output" == *"Canonical-Ubuntu-24.04-2026.10.01-0"* ]]
   [[ "$output" == *"Server configured successfully."* ]]
   [[ "$output" == *"Public IP:     203.0.113.10"* ]]
+  [[ "$output" == *"should print ip=203.0.113.10"* ]]
 
   calls oci | grep -q -- 'compute instance launch .*--image-id ocid1.image.new .*--subnet-id ocid1.subnet.test'
   calls oci | grep -q -- 'route-table update --rt-id ocid1.rt.test .*ocid1.igw.test'
@@ -161,4 +162,60 @@ EOF
   run bash "$LETHE"
   [ "$status" -eq 0 ]
   [ -z "$(ls -A "$TMPDIR")" ]
+}
+
+@test "--help prints usage without touching OCI" {
+  run bash "$LETHE" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == "Usage: bash lethe.sh"* ]]
+  [[ "$output" == *"UDP_PORTS"* ]]
+  [ -z "$(calls oci)" ]
+  [ ! -e "$LOGF" ]
+}
+
+@test "unknown options are rejected" {
+  run bash "$LETHE" --force
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Unknown option: --force"* ]]
+}
+
+@test "COMPARTMENT_ID defaults to the tenancy in ~/.oci/config" {
+  unset COMPARTMENT_ID
+  mkdir -p "$HOME/.oci"
+  printf '[DEFAULT]\ntenancy=ocid1.tenancy.oc1..fromconfig\n' > "$HOME/.oci/config"
+  run bash "$LETHE"
+  [ "$status" -eq 0 ]
+  calls oci | grep -q -- 'iam compartment get --compartment-id ocid1.tenancy.oc1..fromconfig'
+  calls oci | grep -q -- 'network vcn list -c ocid1.tenancy.oc1..fromconfig'
+}
+
+@test "without a compartment or OCI config it suggests oci setup bootstrap" {
+  unset COMPARTMENT_ID
+  run bash "$LETHE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'Run "oci setup bootstrap" once'* ]]
+  [ -z "$(calls oci)" ]
+}
+
+@test "fails with a hint when the OCI config has no tenancy" {
+  unset COMPARTMENT_ID
+  mkdir -p "$HOME/.oci" && printf '[DEFAULT]\nregion=eu-frankfurt-1\n' > "$HOME/.oci/config"
+  run bash "$LETHE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Set COMPARTMENT_ID"*"~/.oci/config"* ]]
+  [ -z "$(calls oci)" ]
+}
+
+@test "authentication problems stop the script before any change" {
+  respond_script iam_compartment_get <<< 'echo "ERROR: Could not find config file" >&2; exit 1'
+  run bash "$LETHE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"oci setup bootstrap"* ]]
+  [ "$(calls oci)" = "iam compartment get --compartment-id ocid1.tenancy.test" ]
+}
+
+@test "ssh never reads the script's stdin" {
+  run bash "$LETHE"
+  [ "$status" -eq 0 ]
+  [ "$(calls ssh | grep -vc -- '^-n ')" -eq 0 ]
 }
