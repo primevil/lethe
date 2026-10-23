@@ -87,7 +87,7 @@ The script is safe to re-run. If the instance already exists, it only updates th
 
 ## Development
 
-The tests use [bats](https://github.com/bats-core/bats-core) with fake `oci`, `ssh` and `ssh-keygen` commands (`test/mocks`), so they need neither an Oracle Cloud account nor network access. CI runs them together with [ShellCheck](https://www.shellcheck.net) on every push.
+The tests use [bats](https://github.com/bats-core/bats-core) with fake `oci`, `ssh` and `ssh-keygen` commands (`test/mocks`), so they need neither an Oracle Cloud account nor network access. CI runs them together with [ShellCheck](https://www.shellcheck.net) on every pull request and push to `main`.
 
 ```bash
 bats test/
