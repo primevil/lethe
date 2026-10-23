@@ -113,8 +113,8 @@ EOF
 }
 
 # ------------------------------ ENVIRONMENT --------------------------------
-# macos, debian (also Ubuntu, Mint...), fedora, oracle, rhel (also Rocky,
-# Alma, CentOS), arch or unknown. LETHE_UNAME / LETHE_OS_RELEASE are for tests.
+# macos, debian (also Ubuntu, Mint...), fedora, rhel (also Oracle Linux,
+# Rocky, Alma, CentOS), arch or unknown. LETHE_UNAME / LETHE_OS_RELEASE are for tests.
 detect_os() {
   local kernel="${LETHE_UNAME:-}" os_release="${LETHE_OS_RELEASE:-/etc/os-release}" id="" like=""
   [[ -n "$kernel" ]] || kernel=$(uname -s 2>/dev/null || echo unknown)
@@ -126,10 +126,9 @@ detect_os() {
     like=$(. "$os_release" && echo "${ID_LIKE:-}")
   fi
   case "$id" in
-    ol)                                  echo oracle; return ;;
     debian|ubuntu)                       echo debian; return ;;
     fedora)                              echo fedora; return ;;
-    rhel|centos|rocky|almalinux)         echo rhel;   return ;;
+    rhel|ol|centos|rocky|almalinux)      echo rhel;   return ;;
     arch|manjaro|endeavouros)            echo arch;   return ;;
   esac
   case " $like " in
@@ -155,9 +154,6 @@ install_commands() {
       echo "sudo dnf install -y jq openssh-clients pipx"
       echo "pipx install oci-cli"
       echo "pipx ensurepath" ;;
-    oracle)
-      echo "sudo dnf install -y jq openssh-clients python3-pip"
-      echo "python3 -m pip install --user oci-cli" ;;
     rhel)
       echo "sudo dnf install -y jq openssh-clients python3-pip"
       echo "python3 -m pip install --user oci-cli" ;;

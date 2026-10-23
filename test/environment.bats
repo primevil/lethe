@@ -38,7 +38,7 @@ ubuntu debian
 debian debian
 linuxmint debian
 fedora fedora
-ol oracle
+ol rhel
 rocky rhel
 arch arch
 endeavouros arch
@@ -72,7 +72,7 @@ EOF
 
 @test "install_commands covers jq and ssh on every known OS" {
   local os
-  for os in macos debian fedora oracle rhel arch; do
+  for os in macos debian fedora rhel arch; do
     run install_commands "$os"
     [[ "$output" == *jq* && "$output" == *oci-cli* ]] || { echo "$os: $output"; return 1; }
     [[ "$os" == macos || "$output" == *openssh* ]] || { echo "$os: no openssh"; return 1; }
