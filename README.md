@@ -52,11 +52,14 @@ Every setting can be overridden with an environment variable, e.g. `SHAPE=VM.Sta
 | `UBUNTU_MINIMAL` | `false` | Use the Minimal image |
 | `TCP_PORTS` | `443` | Extra TCP ports to open (22 is always open) |
 | `UDP_PORTS` | `443` | UDP ports to open |
-| `SWAP_GB` | `2` | Swap file size |
+| `SWAP_GB` | `2` | Swap file size (`0` disables swap) |
 | `SSH_KEY` | `~/.ssh/oci_key` | Key pair in Cloud Shell, generated if missing |
 | `EXTRA_PUBKEY` | *(empty)* | Your own public key, added to the server |
 | `INSTANCE_NAME` | `ubuntu-free` | Instance display name |
 | `LAUNCH_RETRIES` / `RETRY_DELAY` | `30` / `60` | Retries on *Out of host capacity* |
+| `SSH_RETRIES` / `SSH_RETRY_DELAY` | `60` / `10` | How long to wait for SSH after launch |
+
+Settings are validated before anything is created: ports must be numbers 1-65535, numeric settings non-negative integers and `EXTRA_PUBKEY` a single SSH public key line.
 
 ## Re-running
 
@@ -81,6 +84,17 @@ The script is safe to re-run. If the instance already exists, it only updates th
 - Never share `/opt/amnezia/xray/server.json`, Reality private keys or client IDs. If they leak, reinstall the Xray protocol in the Amnezia client to rotate them.
 - Do not open port 53 publicly: AmneziaDNS works inside the tunnel, and a public resolver gets abused for DDoS amplification.
 - Always Free instances that stay idle for 7 days may be reclaimed by Oracle; upgrading the account to Pay As You Go removes this while keeping the free limits.
+
+## Development
+
+The tests use [bats](https://github.com/bats-core/bats-core) with fake `oci`, `ssh` and `ssh-keygen` commands (`test/mocks`), so they need neither an Oracle Cloud account nor network access. CI runs them together with [ShellCheck](https://www.shellcheck.net) on every push.
+
+```bash
+bats test/
+shellcheck -x lethe.sh test/mocks/* test/test_helper.bash
+```
+
+On macOS install `bats-core`, `shellcheck` and `gnu-sed` with Homebrew (the iptables rules are patched with GNU sed, as on the server).
 
 ## License
 

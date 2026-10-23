@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Fake ssh for tests: records calls, exits with $MOCK_SSH_RC (default 0) and
+# answers the bootstrap log check with $MOCK_BOOTSTRAP_LINE.
+mkdir -p "$MOCK_DIR/calls"
+echo "$*" >> "$MOCK_DIR/calls/ssh"
+[[ "$*" == *vpn-bootstrap.log* ]] && echo "${MOCK_BOOTSTRAP_LINE-BOOTSTRAP OK}"
+exit "${MOCK_SSH_RC:-0}"
